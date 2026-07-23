@@ -11,27 +11,53 @@ WP_APP_PASSWORD = os.environ["WP_APP_PASSWORD"]
 ARTICLE_FILE = "article.json"
 LOG_FILE = "logs/post_log.jsonl"
 
+
+def write_log(log_entry):
+    os.makedirs("logs", exist_ok=True)
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+    print(json.dumps(log_entry, ensure_ascii=False, indent=2))
+
+
 def main():
-    with open(ARTICLE_FILE, "r", encoding="utf-8") as f:
-        article = json.load(f)
+    log_entry = {
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+    # 1. article.json の読み込み
+    try:
+        with open(ARTICLE_FILE, "r", encoding="utf-8") as f:
+            article = json.load(f)
+    except Exception as e:
+        log_entry["result"] = "error"
+        log_entry["error"] = f"article.json の読み込みに失敗: {e}"
+        write_log(log_entry)
+        return
+
+    # 2. 必須フィールドのチェック
+    title = article.get("title")
+    content = article.get("content")
+    log_entry["title"] = title
+
+    if not title or not content:
+        log_entry["result"] = "error"
+        log_entry["error"] = "article.json に title または content がありません"
+        write_log(log_entry)
+        return
 
     payload = {
-        "title": article["title"],
-        "content": article["content"],
-        "status": "draft",
+        "title": title,
+        "content": content,
+        "status": "publish",
     }
-    if "excerpt" in article:
+    if article.get("excerpt"):
         payload["excerpt"] = article["excerpt"]
-    if "slug" in article:
+    if article.get("slug"):
         payload["slug"] = article["slug"]
 
     auth = HTTPBasicAuth(WP_USER, WP_APP_PASSWORD)
 
-    log_entry = {
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-        "title": article["title"],
-    }
-
+    # 3. WordPressへ投稿
     try:
         resp = requests.post(WP_URL, json=payload, auth=auth, timeout=30)
         log_entry["http_status"] = resp.status_code
@@ -47,11 +73,8 @@ def main():
         log_entry["result"] = "error"
         log_entry["error"] = str(e)
 
-    os.makedirs("logs", exist_ok=True)
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+    write_log(log_entry)
 
-    print(json.dumps(log_entry, ensure_ascii=False, indent=2))
 
 if __name__ == "__main__":
     main()
